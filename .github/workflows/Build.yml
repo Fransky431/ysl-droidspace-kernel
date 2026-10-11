@@ -1,4 +1,4 @@
-name: build-droidspaces-kernel
+name: build-FandC-Project-kernel
 on:
   workflow_dispatch:
     inputs:
@@ -9,8 +9,8 @@ on:
         description: Branch (kosong = default)
         default: ""
       defconfig:
-        description: Nama defconfig (kosongkan di run pertama untuk lihat daftar)
-        default: ""
+        description: Nama defconfig
+        default: "vendor/msm8953-perf_defconfig vendor/mi8953.config"
 
 jobs:
   build:
@@ -41,7 +41,7 @@ jobs:
             exit 1
           fi
 
-      - name: Tambah config Droidspaces
+      - name: Tambah config Droidspaces (F&C Project)
         working-directory: src
         run: |
           cat > arch/arm64/configs/droidspaces.config <<'EOF'
@@ -65,9 +65,11 @@ jobs:
             fi
           done
 
-      - name: Build
+      - name: Build F&C Project
         working-directory: src
         run: |
+          export KBUILD_BUILD_USER="Fransky431"
+          export KBUILD_BUILD_HOST="FandC-Project"
           MK="make O=out ARCH=arm64 CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
             OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
             CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-"
