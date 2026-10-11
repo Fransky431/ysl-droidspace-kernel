@@ -1,0 +1,107 @@
+name: build-droidspaces-kernel
+on:
+  workflow_dispatch:
+    inputs:
+      src_url:
+        description: URL repo source kernel
+        default: https://gitea.com/imren0x/msm-4.19
+      src_branch:
+        description: Branch (kosong = default)
+        default: ""
+      defconfig:
+        description: Nama defconfig (kosongkan di run pertama untuk lihat daftar)
+        default: ""
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld llvm gcc-aarch64-linux-gnu \
+            bc bison flex libssl-dev libelf-dev zip unzip cpio python3
+
+      - name: Clone source
+        run: |
+          B="${{ inputs.src_branch }}"
+          git clone --depth 1 ${B:+-b $B} "${{ inputs.src_url }}" src
+
+      - name: Pilih defconfig
+        working-directory: src
+        run: |
+          if [ -z "${{ inputs.defconfig }}" ]; then
+            echo "=== Daftar defconfig yang cocok ==="
+            ls arch/arm64/configs | grep -iE 'ysl|8953'
+            echo "Isi input defconfig dengan salah satu nama di atas, lalu run ulang."
+            exit 1
+          fi
+
+      - name: Tambah config Droidspaces
+        working-directory: src
+        run: |
+          cat > arch/arm64/configs/droidspaces.config <<'EOF'
+          CONFIG_SYSVIPC=y
+          CONFIG_POSIX_MQUEUE=y
+          CONFIG_IPC_NS=y
+          CONFIG_PID_NS=y
+          CONFIG_DEVTMPFS=y
+          CONFIG_USER_NS=y
+          EOF
+
+      - name: Patch non-GKI Droidspaces
+        working-directory: src
+        run: |
+          git clone --depth 1 https://github.com/ravindu644/Droidspaces-OSS /tmp/ds
+          for p in /tmp/ds/Documentation/resources/kernel-patches/non-GKI/*.patch; do
+            if patch -p1 --dry-run < "$p" > /dev/null; then
+              patch -p1 < "$p" && echo "OK   $p"
+            else
+              echo "SKIP $p (tidak bisa nempel)"
+            fi
+          done
+
+      - name: Build
+        working-directory: src
+        run: |
+          MK="make O=out ARCH=arm64 CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
+            OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-"
+          $MK ${{ inputs.defconfig }} droidspaces.config
+          $MK olddefconfig
+          KVER=$($MK -s kernelversion)
+          echo "KVER=$KVER" >> $GITHUB_ENV
+          echo "=== Versi kernel: $KVER ==="
+          echo "=== Cek config ==="
+          for o in SYSVIPC POSIX_MQUEUE IPC_NS PID_NS DEVTMPFS USER_NS; do
+            grep -q "^CONFIG_$o=y" out/.config && echo "OK   $o" || { echo "HILANG $o"; exit 1; }
+          done
+          grep -E "CONFIG_KSU" out/.config || echo "(tidak ada CONFIG_KSU di config)"
+          $MK -j$(nproc)
+
+      - name: Paket zip (F&C Project)
+        run: |
+          BASE=$(ls *.zip | head -1)
+          echo "Zip dasar: $BASE"
+          mkdir ak && unzip -q "$BASE" -d ak
+          for f in $(cd ak && ls | grep -E '^Image'); do
+            if [ -f src/out/arch/arm64/boot/$f ]; then
+              cp src/out/arch/arm64/boot/$f ak/$f && echo "diganti: $f"
+            else
+              echo "Tidak ada hasil build untuk $f"; exit 1
+            fi
+          done
+          if grep -q '^kernel.string' ak/anykernel.sh; then
+            sed -i 's|^kernel.string=.*|kernel.string=F\&C Project|' ak/anykernel.sh
+          else
+            sed -i 's|^do.devicecheck=1|kernel.string=F\&C Project\ndo.devicecheck=1|' ak/anykernel.sh
+          fi
+          grep -n 'kernel.string' ak/anykernel.sh
+          (cd ak && zip -qr9 ../FandC-Project-ysl-${KVER}.zip .)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FandC-Project-kernel
+          path: FandC-Project-ysl-*.zip
