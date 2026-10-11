@@ -34,7 +34,9 @@ jobs:
         run: |
           if [ -z "${{ inputs.defconfig }}" ]; then
             echo "=== Daftar defconfig yang cocok ==="
-            ls arch/arm64/configs | grep -iE 'ysl|8953'
+            find arch/arm64/configs -type f | grep -iE 'ysl|8953|mido|vince' || true
+            echo "=== Isi folder configs (40 pertama) ==="
+            ls arch/arm64/configs | head -40
             echo "Isi input defconfig dengan salah satu nama di atas, lalu run ulang."
             exit 1
           fi
